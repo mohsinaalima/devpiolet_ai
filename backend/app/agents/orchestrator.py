@@ -1,3 +1,6 @@
+
+from app.tools.rag_tools import search_uploaded_documents
+
 from langgraph.prebuilt import create_react_agent
 from app.tools.github import get_github_file_contents
 import operator
@@ -211,25 +214,31 @@ def research_agent(state: AgentState) -> dict:
 
 
 def rag_agent(state: AgentState) -> dict:
-    """
-    Placeholder for the RAG Agent.
-    """
-
-    print("[RAG Agent] Processing request...")
-
-    return {
-        "messages": [
-            AIMessage(
-                content=(
-                    "[RAG Agent] "
-                    "I would search the uploaded documents or PDFs "
-                    "and answer using the retrieved context."
-                )
-            )
-        ]
-    }
-
-
+    print("[RAG Agent] Initializing ReAct Agent to search documents...")
+    
+    # 1. Setup LLM (Using the Pro model that worked for you earlier)
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    llm = ChatGoogleGenerativeAI(
+    model="gemini-3.6-flash",
+    api_key=api_key,
+)
+    
+    # 2. Give the agent our new Document Search tool
+    tools = [search_uploaded_documents]
+    agent = create_react_agent(llm, tools)
+    
+    # 3. Create the System Prompt
+    system_prompt = SystemMessage(content=(
+        "You are a helpful AI Document Assistant. "
+        "Use the search_uploaded_documents tool to find answers in the user's PDFs. "
+        "Always base your answers strictly on the context retrieved from the tool."
+    ))
+    
+    input_messages = [system_prompt] + list(state["messages"])
+    result = agent.invoke({"messages": input_messages})
+    
+    new_messages = result["messages"][len(input_messages):]
+    return {"messages": new_messages}
 
 # 7. Reviewer Agent
 

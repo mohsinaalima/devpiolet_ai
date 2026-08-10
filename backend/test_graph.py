@@ -1,5 +1,7 @@
+import os
 from app.agents.orchestrator import graph
 from langchain_core.messages import HumanMessage
+from app.rag.ingest import ingest_pdf
 
 def test_routing(user_query: str):
     print(f"\n--- Testing Query: '{user_query}' ---")
@@ -13,5 +15,18 @@ def test_routing(user_query: str):
                 print(f"Message: {state['messages'][-1].content}")
 
 if __name__ == "__main__":
-    # Ask the AI to read a specific file from GitHub!
-    test_routing("Can you read 'README.md' from the GitHub repository 'octocat/Hello-World' and tell me what it says?")
+    # 1. First, let's ingest a test PDF into PostgreSQL!
+    # Make sure you have a file named 'test.pdf' in your backend folder.
+    pdf_path = "test.pdf"
+    
+    if os.path.exists(pdf_path):
+        print("--- Step 1: Ingesting PDF ---")
+        ingest_pdf(pdf_path)
+    else:
+        print(f"⚠️ Warning: Could not find '{pdf_path}' in the backend folder.")
+        print("Please copy any small PDF file (like a resume) into the 'backend' folder, rename it to 'test.pdf', and run this again.")
+        exit()
+
+    # 2. Then, ask the AI a question about it!
+    # The supervisor should automatically route this to the rag_agent.
+    test_routing("According to my uploaded document, what is the main topic or name mentioned?")
