@@ -1,4 +1,4 @@
-
+from langgraph.checkpoint.memory import MemorySaver
 from app.tools.rag_tools import search_uploaded_documents
 
 from langgraph.prebuilt import create_react_agent
@@ -406,7 +406,11 @@ builder.add_edge(
 
 
 
-graph = builder.compile()
+# Memory object create karein
+memory = MemorySaver()
+
+# Graph ko memory ke sath compile karein
+graph = builder.compile(checkpointer=memory)
 
 
 if __name__ == "__main__":

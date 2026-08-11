@@ -39,9 +39,14 @@ async def chat_endpoint(request: ChatRequest):
     try:
         final_response = "I'm sorry, I couldn't process that."
         last_agent = ""
-        
+
+        config = {
+            "configurable": {"thread_id": "user_session_1"}, 
+            "recursion_limit": 10
+        }
         # Run the graph
-        for output in graph.stream(initial_state, {"recursion_limit": 10}):
+        for output in graph.stream(initial_state, config):
+
             for node_name, state in output.items():
                 last_agent = node_name
                 if "messages" in state:
