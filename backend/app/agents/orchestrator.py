@@ -191,23 +191,52 @@ def coding_agent(state: AgentState) -> dict:
     }
 def research_agent(state: AgentState) -> dict:
     """
-    Placeholder for the Research Agent.
+    Research Agent:
+    Handles technical questions, comparisons, and explanations.
     """
 
     print("[Research Agent] Processing request...")
 
-    return {
-        "messages": [
-            AIMessage(
-                content=(
-                    "[Research Agent] "
-                    "I would research the requested technology, "
-                    "compare relevant solutions, and provide findings."
-                )
-            )
-        ]
-    }
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
 
+    if not api_key:
+        raise ValueError(
+            "Gemini API key not found. "
+            "Set GOOGLE_API_KEY or GEMINI_API_KEY in your .env file."
+        )
+
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3.6-flash",
+        api_key=api_key,
+        
+    )
+
+    system_prompt = SystemMessage(
+        content=(
+            "You are the DevPilot AI Research Agent. "
+            "You specialize in technical research, programming concepts, "
+            "framework comparisons, architecture decisions, and "
+            "software engineering questions. "
+            "\n\n"
+            "Give accurate, clear and practical answers. "
+            "When comparing technologies, explain pros, cons, "
+            "use cases and recommend an option when appropriate. "
+            "Do not mention that you are a sub-agent."
+        )
+    )
+
+    messages = [
+        system_prompt,
+        *list(state["messages"]),
+    ]
+
+    response = llm.invoke(messages)
+
+    print("[Research Agent] Research completed.")
+
+    return {
+        "messages": [response]
+    }
 
 
 # 6. RAG Agent
@@ -245,24 +274,55 @@ def rag_agent(state: AgentState) -> dict:
 
 def reviewer_agent(state: AgentState) -> dict:
     """
-    Placeholder for the final Reviewer Agent.
+    Reviewer Agent:
+    Takes the user's original request and the specialist agent's
+    response and generates the final answer.
     """
 
     print("[Reviewer Agent] Creating final response...")
 
-    summary = (
-        "[Reviewer Agent] "
-        "Here is the final synthesized response based on "
-        "the specialist agent's work."
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
+        raise ValueError(
+            "Gemini API key not found. "
+            "Set GOOGLE_API_KEY or GEMINI_API_KEY in your .env file."
+        )
+
+    llm = ChatGoogleGenerativeAI(
+        model="gemini-3.6-flash",
+        api_key=api_key,
     )
 
+    # Convert the conversation into plain text.
+    conversation = "\n\n".join(
+        f"{message.__class__.__name__}: {message.content}"
+        for message in state["messages"]
+    )
+
+    review_prompt = HumanMessage(
+        content=(
+            "You are the final Reviewer Agent of DevPilot AI.\n\n"
+            "Create the final answer for the user based on the "
+            "conversation and specialist agent's work below.\n\n"
+            "Rules:\n"
+            "- Answer the user's actual question.\n"
+            "- Use the specialist agent's findings.\n"
+            "- Do not mention internal agents or routing.\n"
+            "- Do not invent information.\n"
+            "- Keep the answer clear and practical.\n\n"
+            "Conversation and specialist work:\n"
+            f"{conversation}"
+        )
+    )
+
+    response = llm.invoke([review_prompt])
+
+    print("[Reviewer Agent] Final response generated.")
+
     return {
-        "messages": [
-            AIMessage(content=summary)
-        ]
+        "messages": [response]
     }
-
-
 
 # 8. Build LangGraph
 
