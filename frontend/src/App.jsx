@@ -1,17 +1,35 @@
-import { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+
+// ── DevPilot Color Palette ──────────────────────────────────────────
+const THEME = {
+  bg: "#141411", // primary background
+  bgHeader: "#11110F", // deepest surface
+  surface: "#191916", // sidebar / composer
+  surfaceRaised: "#1D1D19", // cards / AI bubbles
+  surfaceHover: "#23231F",
+  border: "#2A2A24", // subtle warm gray border
+  borderStrong: "#3A3A32",
+  ivory: "#F3F0E8", // primary text
+  stoneSecondary: "#A8A49A", // secondary text
+  stoneMuted: "#716E66", // muted text
+  copper: "#C47A52", // main accent
+  copperBright: "#D98C61", // hover accent
+  copperMuted: "rgba(196, 122, 82, 0.12)",
+  sage: "#879B7A", // operational status indicator
+};
 
 export default function App() {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [focused, setFocused] = useState(false);
 
-  // Auto-scroll ke liye ref
   const messagesEndRef = useRef(null);
+  const textareaRef = useRef(null);
 
-  // Jab bhi messages update honge, yeh automatically neeche scroll kar dega
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
@@ -20,12 +38,19 @@ export default function App() {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
-
-    const newMessages = [...messages, { role: "user", content: input }];
-    setMessages(newMessages);
+  const handleNewChat = () => {
+    setMessages([]);
     setInput("");
+  };
+
+  const sendMessage = async (customPrompt) => {
+    const textToSend = customPrompt || input;
+    if (!textToSend.trim() || isLoading) return;
+
+    const userMessage = { role: "user", content: textToSend };
+    
+    setMessages((prev) => [...prev, userMessage]);
+    if (!customPrompt) setInput("");
     setIsLoading(true);
 
     try {
@@ -33,27 +58,27 @@ export default function App() {
       const response = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({ message: textToSend }),
       });
 
       const data = await response.json();
 
-      setMessages([
-        ...newMessages,
+      setMessages((prev) => [
+        ...prev,
         {
           role: "ai",
-          content: data.response,
-          agent: data.agent_used,
+          content: data.response || "No response received.",
+          agent: data.agent_used || "Router",
         },
       ]);
     } catch (error) {
-      console.error("Error:", error);
-      setMessages([
-        ...newMessages,
+      console.error("Error sending message:", error);
+      setMessages((prev) => [
+        ...prev,
         {
           role: "ai",
-          content:
-            "⚠️ Error connecting to server. Is your Python backend running?",
+          content: "⚠️ **Connection Error**: Couldn't reach the backend server. Please verify your API status.",
+          agent: "System",
         },
       ]);
     } finally {
@@ -62,121 +87,337 @@ export default function App() {
   };
 
   return (
-    <div className='flex h-screen bg-gray-900 text-gray-100 font-sans overflow-hidden'>
-      {/* Sidebar (Optional - For future File Uploads or History) */}
-      <div className='w-64 bg-gray-950 border-r border-gray-800 hidden md:flex flex-col p-4'>
-        <h2 className='text-xl font-bold text-blue-500 mb-6 flex items-center gap-2'>
-          🚀 DevPilot AI
-        </h2>
-        <div className='text-sm text-gray-400'>
-          <p className='mb-2'>✓ Multi-Agent System</p>
-          <p className='mb-2'>✓ RAG Document Search</p>
-          <p className='mb-2'>✓ Smart Routing</p>
-        </div>
-      </div>
+    <div
+      className="flex h-screen font-sans overflow-hidden antialiased select-none"
+      style={{ backgroundColor: THEME.bg, color: THEME.ivory }}
+    >
+      {/* Sidebar */}
+      <Sidebar onNewChat={handleNewChat} messageCount={messages.length} />
 
-      {/* Main Chat Area */}
-      <div className='flex-1 flex flex-col h-screen'>
-        {/* Header */}
-        <header className='bg-gray-800 p-4 shadow-md text-center border-b border-gray-700 md:hidden'>
-          <h1 className='text-xl font-bold text-blue-400'>DevPilot AI</h1>
+      {/* Main Chat Workspace */}
+      <div className="flex-1 flex flex-col h-screen relative">
+        {/* Mobile Header */}
+        <header
+          className="p-4 flex items-center justify-between md:hidden z-10"
+          style={{ backgroundColor: THEME.bgHeader, borderBottom: `1px solid ${THEME.border}` }}
+        >
+          <div className="flex items-center gap-2">
+            <span className="font-semibold tracking-tight text-base" style={{ color: THEME.ivory }}>
+              DEV<span style={{ color: THEME.copper }}>PILOT</span>
+            </span>
+          </div>
+          <button
+            onClick={handleNewChat}
+            className="text-xs px-2.5 py-1.5 rounded font-medium transition-colors"
+            style={{ backgroundColor: THEME.surfaceRaised, border: `1px solid ${THEME.border}`, color: THEME.ivory }}
+          >
+            + New
+          </button>
         </header>
 
-        {/* Chat History */}
-        <div className='flex-1 overflow-y-auto p-4 md:p-8 space-y-6 scroll-smooth'>
-          {messages.length === 0 && (
-            <div className='flex flex-col items-center justify-center h-full text-gray-500'>
-              <span className='text-4xl mb-4'>👋</span>
-              <p className='text-lg'>How can I help you code today?</p>
-            </div>
+        {/* Message Feed */}
+        <div className="flex-1 overflow-y-auto px-4 py-6 md:px-12 md:py-8 space-y-6 scroll-smooth select-text">
+          {messages.length === 0 ? (
+            <EmptyState onSelectPrompt={(prompt) => sendMessage(prompt)} />
+          ) : (
+            messages.map((msg, idx) => <MessageItem key={idx} message={msg} />)
           )}
 
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-            >
-              <div
-                className={`max-w-4xl p-5 rounded-2xl shadow-md ${msg.role === "user" ? "bg-blue-600 text-white rounded-br-none" : "bg-gray-800 border border-gray-700 text-gray-200 rounded-bl-none"}`}
-              >
-                {msg.agent && (
-                  <div className='text-xs text-green-400 mb-3 font-mono uppercase tracking-widest flex items-center gap-1'>
-                    <span>⚡ Agent: {msg.agent}</span>
-                  </div>
-                )}
-
-                {/* Advanced Markdown Rendering with Code Highlighting */}
-                <div className='prose prose-invert max-w-none prose-pre:bg-transparent prose-pre:p-0'>
-                  <ReactMarkdown
-                    components={{
-                      code({ node, inline, className, children, ...props }) {
-                        const match = /language-(\w+)/.exec(className || "");
-                        return !inline && match ? (
-                          <SyntaxHighlighter
-                            {...props}
-                            children={String(children).replace(/\n$/, "")}
-                            style={atomDark}
-                            language={match[1]}
-                            PreTag='div'
-                            className='rounded-md mt-2 mb-2 text-sm'
-                          />
-                        ) : (
-                          <code
-                            {...props}
-                            className='bg-gray-700 text-blue-300 px-1 py-0.5 rounded text-sm'
-                          >
-                            {children}
-                          </code>
-                        );
-                      },
-                    }}
-                  >
-                    {msg.content}
-                  </ReactMarkdown>
-                </div>
-              </div>
-            </div>
-          ))}
-
+          {/* Thinking Indicator */}
           {isLoading && (
-            <div className='flex justify-start'>
-              <div className='bg-gray-800 border border-gray-700 text-gray-400 p-4 rounded-2xl rounded-bl-none flex items-center gap-2'>
-                <div
-                  className='w-2 h-2 bg-blue-500 rounded-full animate-bounce'
-                  style={{ animationDelay: "0ms" }}
-                ></div>
-                <div
-                  className='w-2 h-2 bg-blue-500 rounded-full animate-bounce'
-                  style={{ animationDelay: "150ms" }}
-                ></div>
-                <div
-                  className='w-2 h-2 bg-blue-500 rounded-full animate-bounce'
-                  style={{ animationDelay: "300ms" }}
-                ></div>
+            <div className="flex justify-start">
+              <div
+                className="px-4 py-3 rounded-2xl flex items-center gap-2"
+                style={{
+                  backgroundColor: THEME.surfaceRaised,
+                  border: `1px solid ${THEME.border}`,
+                  borderBottomLeftRadius: 4,
+                }}
+              >
+                <span className="text-xs font-mono tracking-wider mr-2" style={{ color: THEME.stoneMuted }}>
+                  THINKING
+                </span>
+                {[0, 150, 300].map((delay) => (
+                  <div
+                    key={delay}
+                    className="w-1.5 h-1.5 rounded-full animate-bounce"
+                    style={{ backgroundColor: THEME.copper, animationDelay: `${delay}ms` }}
+                  />
+                ))}
               </div>
             </div>
           )}
-          {/* This empty div acts as the anchor for auto-scroll */}
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input Area */}
-        <div className='p-4 bg-gray-900 border-t border-gray-800'>
-          <div className='max-w-4xl mx-auto flex gap-2 relative'>
-            <input
-              type='text'
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-              placeholder='Ask anything or request a code review...'
-              className='flex-1 bg-gray-800 text-white p-4 pr-32 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 border border-gray-700'
-            />
+        {/* Composer / Input Area */}
+        <Composer
+          input={input}
+          setInput={setInput}
+          sendMessage={() => sendMessage()}
+          isLoading={isLoading}
+          focused={focused}
+          setFocused={setFocused}
+          textareaRef={textareaRef}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Sub-Components ──────────────────────────────────────────────────
+
+function Sidebar({ onNewChat, messageCount }) {
+  return (
+    <aside
+      className="w-64 hidden md:flex flex-col p-5 select-none"
+      style={{ backgroundColor: THEME.surface, borderRight: `1px solid ${THEME.border}` }}
+    >
+      {/* Brand Header */}
+      <div className="mb-8">
+        <div
+          className="text-[10px] tracking-[0.2em] font-mono uppercase mb-1.5"
+          style={{ color: THEME.stoneMuted }}
+        >
+          Engineering Assistant
+        </div>
+        <h1 className="text-xl font-bold tracking-tight" style={{ color: THEME.ivory }}>
+          DEV<span style={{ color: THEME.copper }}>PILOT</span>
+        </h1>
+      </div>
+
+      {/* New Conversation Button */}
+      <button
+        onClick={onNewChat}
+        className="w-full px-3.5 py-2.5 rounded-lg flex items-center justify-between text-sm font-medium transition-all group mb-6 hover:opacity-90"
+        style={{
+          backgroundColor: THEME.surfaceRaised,
+          border: `1px solid ${THEME.border}`,
+          color: THEME.ivory,
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <span style={{ color: THEME.copper }}>+</span>
+          <span>New session</span>
+        </div>
+        {messageCount > 0 && (
+          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono" style={{ backgroundColor: THEME.bg, color: THEME.stoneMuted }}>
+            {messageCount}
+          </span>
+        )}
+      </button>
+
+      {/* Capabilities Overview */}
+      <div className="space-y-3 mb-8">
+        <div className="text-[11px] font-mono uppercase tracking-wider" style={{ color: THEME.stoneMuted }}>
+          Capabilities
+        </div>
+        <div className="space-y-2 text-xs" style={{ color: THEME.stoneSecondary }}>
+          <div className="flex items-center gap-2.5">
+            <span style={{ color: THEME.copper }}>◆</span> Multi-Agent Orchestration
+          </div>
+          <div className="flex items-center gap-2.5">
+            <span style={{ color: THEME.copper }}>◆</span> Contextual RAG Search
+          </div>
+          <div className="flex items-center gap-2.5">
+            <span style={{ color: THEME.copper }}>◆</span> Code & Architecture Review
+          </div>
+        </div>
+      </div>
+
+      {/* Status Footer */}
+      <div className="mt-auto pt-4 border-t border-[#22221D] flex items-center justify-between text-xs" style={{ color: THEME.stoneMuted }}>
+        <div className="flex items-center gap-2">
+          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: THEME.sage }} />
+          <span>Backend Ready</span>
+        </div>
+        <span className="font-mono text-[10px]">v1.0.0</span>
+      </div>
+    </aside>
+  );
+}
+
+function EmptyState({ onSelectPrompt }) {
+  const prompts = [
+    { label: "Debug Code", text: "I have a bug in my async code. Can you help me trace it?" },
+    { label: "Architecture", text: "Compare PostgreSQL vs MongoDB for high-throughput time-series data." },
+    { label: "Refactor", text: "How can I refactor this function to be more clean and performant?" },
+  ];
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[70vh] text-center max-w-xl mx-auto px-4">
+      <div
+        className="w-12 h-12 rounded-xl mb-4 flex items-center justify-center font-bold text-lg"
+        style={{ backgroundColor: THEME.copperMuted, color: THEME.copper, border: `1px solid ${THEME.border}` }}
+      >
+        DP
+      </div>
+      <h2 className="text-3xl font-bold tracking-tight mb-2" style={{ color: THEME.ivory }}>
+        DEV<span style={{ color: THEME.copper }}>PILOT</span>
+      </h2>
+      <p className="text-sm mb-8 leading-relaxed" style={{ color: THEME.stoneSecondary }}>
+        High-precision engineering intelligence. Drop code, debug errors, or discuss system architecture without fluff.
+      </p>
+
+      {/* Quick Suggestions */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 w-full">
+        {prompts.map((p, i) => (
+          <button
+            key={i}
+            onClick={() => onSelectPrompt(p.text)}
+            className="p-3.5 rounded-xl text-left transition-all hover:-translate-y-0.5"
+            style={{
+              backgroundColor: THEME.surfaceRaised,
+              border: `1px solid ${THEME.border}`,
+            }}
+          >
+            <div className="text-xs font-semibold mb-1" style={{ color: THEME.copper }}>
+              {p.label}
+            </div>
+            <div className="text-[11px] line-clamp-2 leading-snug" style={{ color: THEME.stoneMuted }}>
+              {p.text}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MessageItem({ message }) {
+  const isUser = message.role === "user";
+
+  return (
+    <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+      <div
+        className="max-w-3xl w-full p-5 rounded-2xl shadow-sm transition-all"
+        style={
+          isUser
+            ? {
+                backgroundColor: THEME.copper,
+                color: "#14110C",
+                borderBottomRightRadius: 4,
+              }
+            : {
+                backgroundColor: THEME.surfaceRaised,
+                border: `1px solid ${THEME.border}`,
+                color: THEME.ivory,
+                borderBottomLeftRadius: 4,
+              }
+        }
+      >
+        {/* Agent Badge */}
+        {!isUser && (
+          <div
+            className="text-[10px] mb-3 font-mono uppercase tracking-widest flex items-center gap-1.5"
+            style={{ color: THEME.copper }}
+          >
+            <span style={{ color: THEME.sage }}>●</span>
+            <span>Agent / {message.agent || "System"}</span>
+          </div>
+        )}
+
+        {/* Content */}
+        <div className={`prose prose-invert max-w-none text-sm leading-relaxed ${isUser ? "font-medium" : ""}`}>
+          <ReactMarkdown
+            components={{
+              code({ node, inline, className, children, ...props }) {
+                const match = /language-(\w+)/.exec(className || "");
+                return !inline && match ? (
+                  <div className="my-3 rounded-lg overflow-hidden border" style={{ borderColor: THEME.border }}>
+                    <div
+                      className="px-3 py-1 text-[10px] font-mono uppercase flex justify-between items-center"
+                      style={{ backgroundColor: THEME.bgHeader, color: THEME.stoneMuted }}
+                    >
+                      <span>{match[1]}</span>
+                    </div>
+                    <SyntaxHighlighter
+                      {...props}
+                      children={String(children).replace(/\n$/, "")}
+                      style={atomDark}
+                      language={match[1]}
+                      PreTag="div"
+                      customStyle={{
+                        margin: 0,
+                        padding: "1rem",
+                        backgroundColor: THEME.bgHeader,
+                        fontSize: "0.85rem",
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <code
+                    {...props}
+                    className="px-1.5 py-0.5 rounded font-mono text-xs"
+                    style={
+                      isUser
+                        ? { backgroundColor: "rgba(0,0,0,0.15)", color: "#14110C" }
+                        : { backgroundColor: THEME.bgHeader, color: THEME.copper }
+                    }
+                  >
+                    {children}
+                  </code>
+                );
+              },
+            }}
+          >
+            {message.content}
+          </ReactMarkdown>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Composer({ input, setInput, sendMessage, isLoading, focused, setFocused, textareaRef }) {
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  return (
+    <div className="p-4 md:p-6" style={{ backgroundColor: THEME.bg, borderTop: `1px solid ${THEME.border}` }}>
+      <div className="max-w-4xl mx-auto relative">
+        <div
+          className="rounded-xl transition-all flex flex-col"
+          style={{
+            backgroundColor: THEME.surface,
+            border: `1px solid ${focused ? THEME.copper : THEME.border}`,
+            boxShadow: focused ? `0 0 12px ${THEME.copperMuted}` : "none",
+          }}
+        >
+          <textarea
+            ref={textareaRef}
+            rows={2}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            placeholder="Ask DevPilot, paste stack traces, or request code reviews..."
+            className="w-full p-4 pr-24 bg-transparent outline-none resize-none text-sm placeholder-stone-600"
+            style={{ color: THEME.ivory }}
+          />
+
+          {/* Action Row */}
+          <div className="flex items-center justify-between px-3 pb-3">
+            <span className="text-[10px] font-mono hidden sm:inline" style={{ color: THEME.stoneMuted }}>
+              Press <kbd className="px-1 py-0.5 rounded bg-zinc-800 border border-zinc-700">Enter ↵</kbd> to send, <kbd className="px-1 py-0.5 rounded bg-zinc-800 border border-zinc-700">Shift + Enter</kbd> for line break
+            </span>
+
             <button
               onClick={sendMessage}
               disabled={isLoading || !input.trim()}
-              className='absolute right-2 top-2 bottom-2 bg-blue-600 hover:bg-blue-500 text-white px-6 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+              className="ml-auto px-4 py-2 rounded-lg text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{
+                backgroundColor: isLoading || !input.trim() ? THEME.surfaceRaised : THEME.copper,
+                color: isLoading || !input.trim() ? THEME.stoneMuted : "#14110C",
+              }}
             >
-              Send
+              <span>SEND</span>
+              <span>↗</span>
             </button>
           </div>
         </div>
