@@ -5,20 +5,20 @@ import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 // ── DevPilot Color Palette ──────────────────────────────────────────
 const THEME = {
-  bg: "#141411", // primary background
-  bgHeader: "#11110F", // deepest surface
-  surface: "#191916", // sidebar / composer
-  surfaceRaised: "#1D1D19", // cards / AI bubbles
+  bg: "#141411",
+  bgHeader: "#11110F",
+  surface: "#191916",
+  surfaceRaised: "#1D1D19",
   surfaceHover: "#23231F",
-  border: "#2A2A24", // subtle warm gray border
+  border: "#2A2A24",
   borderStrong: "#3A3A32",
-  ivory: "#F3F0E8", // primary text
-  stoneSecondary: "#A8A49A", // secondary text
-  stoneMuted: "#716E66", // muted text
-  copper: "#C47A52", // main accent
-  copperBright: "#D98C61", // hover accent
+  ivory: "#F3F0E8",
+  stoneSecondary: "#A8A49A",
+  stoneMuted: "#716E66",
+  copper: "#C47A52",
+  copperBright: "#D98C61",
   copperMuted: "rgba(196, 122, 82, 0.12)",
-  sage: "#879B7A", // operational status indicator
+  sage: "#879B7A",
 };
 
 export default function App() {
@@ -26,6 +26,7 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [attachedFile, setAttachedFile] = useState(null);
 
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -41,16 +42,28 @@ export default function App() {
   const handleNewChat = () => {
     setMessages([]);
     setInput("");
+    setAttachedFile(null);
   };
 
   const sendMessage = async (customPrompt) => {
     const textToSend = customPrompt || input;
-    if (!textToSend.trim() || isLoading) return;
+    if ((!textToSend.trim() && !attachedFile) || isLoading) return;
 
-    const userMessage = { role: "user", content: textToSend };
+    const finalContent =
+      textToSend.trim() ||
+      `Please analyze the uploaded document "${attachedFile?.name}".`;
+
+    const userMessage = {
+      role: "user",
+      content: finalContent,
+      file: attachedFile
+        ? { name: attachedFile.name, size: attachedFile.size }
+        : null,
+    };
 
     setMessages((prev) => [...prev, userMessage]);
     if (!customPrompt) setInput("");
+    setAttachedFile(null); // Clear attached file preview after sending
     setIsLoading(true);
 
     try {
@@ -58,7 +71,7 @@ export default function App() {
       const response = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: textToSend }),
+        body: JSON.stringify({ message: finalContent }),
       });
 
       const data = await response.json();
@@ -176,6 +189,8 @@ export default function App() {
           focused={focused}
           setFocused={setFocused}
           textareaRef={textareaRef}
+          attachedFile={attachedFile}
+          setAttachedFile={setAttachedFile}
         />
       </div>
     </div>
@@ -193,7 +208,6 @@ function Sidebar({ onNewChat, messageCount }) {
         borderRight: `1px solid ${THEME.border}`,
       }}
     >
-      {/* Brand Header */}
       <div className='mb-8'>
         <div
           className='text-[10px] tracking-[0.2em] font-mono uppercase mb-1.5'
@@ -209,7 +223,6 @@ function Sidebar({ onNewChat, messageCount }) {
         </h1>
       </div>
 
-      {/* New Conversation Button */}
       <button
         onClick={onNewChat}
         className='w-full px-3.5 py-2.5 rounded-lg flex items-center justify-between text-sm font-medium transition-all group mb-6 hover:opacity-90'
@@ -233,7 +246,6 @@ function Sidebar({ onNewChat, messageCount }) {
         )}
       </button>
 
-      {/* Capabilities Overview */}
       <div className='space-y-3 mb-8'>
         <div
           className='text-[11px] font-mono uppercase tracking-wider'
@@ -259,7 +271,6 @@ function Sidebar({ onNewChat, messageCount }) {
         </div>
       </div>
 
-      {/* Status Footer */}
       <div
         className='mt-auto pt-4 border-t border-[#22221D] flex items-center justify-between text-xs'
         style={{ color: THEME.stoneMuted }}
@@ -319,7 +330,6 @@ function EmptyState({ onSelectPrompt }) {
         discuss system architecture without fluff.
       </p>
 
-      {/* Quick Suggestions */}
       <div className='grid grid-cols-1 sm:grid-cols-3 gap-3 w-full'>
         {prompts.map((p, i) => (
           <button
@@ -353,6 +363,13 @@ function EmptyState({ onSelectPrompt }) {
 function MessageItem({ message }) {
   const isUser = message.role === "user";
 
+  const formatFileSize = (bytes) => {
+    if (!bytes) return "";
+    return bytes > 1024 * 1024
+      ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+      : `${(bytes / 1024).toFixed(1)} KB`;
+  };
+
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -372,7 +389,6 @@ function MessageItem({ message }) {
               }
         }
       >
-        {/* Agent Badge */}
         {!isUser && (
           <div
             className='text-[10px] mb-3 font-mono uppercase tracking-widest flex items-center gap-1.5'
@@ -383,9 +399,46 @@ function MessageItem({ message }) {
           </div>
         )}
 
-        {/* Content */}
+        {message.file && (
+          <div
+            className='mb-3.5 p-2.5 rounded-lg flex items-center gap-2.5 text-xs border'
+            style={
+              isUser
+                ? {
+                    backgroundColor: "rgba(0,0,0,0.15)",
+                    borderColor: "rgba(0,0,0,0.2)",
+                    color: "#14110C",
+                  }
+                : {
+                    backgroundColor: THEME.bgHeader,
+                    borderColor: THEME.border,
+                    color: THEME.ivory,
+                  }
+            }
+          >
+            <span className='text-base'>📄</span>
+            <div className='flex flex-col min-w-0'>
+              <span className='font-semibold truncate'>
+                {message.file.name}
+              </span>
+              {message.file.size && (
+                <span
+                  className='text-[10px]'
+                  style={{
+                    color: isUser ? "rgba(20,17,12,0.7)" : THEME.stoneMuted,
+                  }}
+                >
+                  {formatFileSize(message.file.size)} • PDF Document
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
         <div
-          className={`prose prose-invert max-w-none text-sm leading-relaxed ${isUser ? "font-medium" : ""}`}
+          className={`prose prose-invert max-w-none text-sm leading-relaxed ${
+            isUser ? "font-medium" : ""
+          }`}
         >
           <ReactMarkdown
             components={{
@@ -457,6 +510,8 @@ function Composer({
   focused,
   setFocused,
   textareaRef,
+  attachedFile,
+  setAttachedFile,
 }) {
   const fileInputRef = useRef(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -469,11 +524,8 @@ function Composer({
   };
 
   const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file || file.type !== "application/pdf") {
-      alert("Please upload a valid PDF file.");
-      return;
-    }
+    const file = e.target.files?.[0];
+    if (!file) return;
 
     setIsUploading(true);
     const formData = new FormData();
@@ -486,20 +538,29 @@ function Composer({
         body: formData,
       });
 
-      const data = await response.json();
       if (response.ok) {
-        sendMessage(
-          `I just uploaded a document named ${file.name}. Please confirm you can read it, and I will ask you questions about it.`,
-        );
+        console.log("Upload Success 200 OK. Setting state for:", file.name);
+        setAttachedFile({
+          name: file.name,
+          size: file.size,
+        });
       } else {
-        alert("Upload failed. Check backend logs.");
+        alert(`Upload failed with status code ${response.status}`);
       }
     } catch (error) {
       console.error("Error uploading file:", error);
+      alert("Error connecting to server for file upload.");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
+
+  const formatFileSize = (bytes) => {
+    if (!bytes) return "";
+    return bytes > 1024 * 1024
+      ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+      : `${(bytes / 1024).toFixed(1)} KB`;
   };
 
   return (
@@ -515,10 +576,58 @@ function Composer({
           className='rounded-xl transition-all flex flex-col'
           style={{
             backgroundColor: THEME.surface,
-            border: `1px solid ${focused ? THEME.copper : THEME.border}`,
+            border: `1px solid ${
+              attachedFile
+                ? THEME.copper
+                : focused
+                  ? THEME.copper
+                  : THEME.border
+            }`,
             boxShadow: focused ? `0 0 12px ${THEME.copperMuted}` : "none",
           }}
         >
+          {/* Active File Badge inside Composer */}
+          {attachedFile && (
+            <div
+              className='m-3 p-3 rounded-lg flex items-center justify-between text-xs border'
+              style={{
+                backgroundColor: THEME.bgHeader,
+                borderColor: THEME.copper,
+                color: THEME.ivory,
+              }}
+            >
+              <div className='flex items-center gap-3 min-w-0'>
+                <span className='text-lg'>📄</span>
+                <div className='flex flex-col min-w-0'>
+                  <span
+                    className='font-semibold truncate text-sm'
+                    style={{ color: THEME.ivory }}
+                  >
+                    {attachedFile.name}
+                  </span>
+                  <span
+                    style={{ color: THEME.sage }}
+                    className='text-[11px] font-mono flex items-center gap-1.5 mt-0.5'
+                  >
+                    <span
+                      className='w-1.5 h-1.5 rounded-full'
+                      style={{ backgroundColor: THEME.sage }}
+                    />
+                    {formatFileSize(attachedFile.size)} • Indexed in PostgreSQL
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setAttachedFile(null)}
+                className='px-2 py-1 rounded transition-colors text-xs font-bold hover:text-red-400'
+                style={{ color: THEME.stoneMuted }}
+                title='Remove attachment'
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
           <textarea
             ref={textareaRef}
             rows={2}
@@ -527,8 +636,12 @@ function Composer({
             onKeyDown={handleKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder='Ask DevPilot, attach a PDF, or request code reviews...'
-            className='w-full p-4 pr-24 bg-transparent outline-none resize-none text-sm placeholder-stone-600'
+            placeholder={
+              attachedFile
+                ? `Ask anything about ${attachedFile.name}...`
+                : "Ask DevPilot, attach a PDF, or request code reviews..."
+            }
+            className='w-full p-4 bg-transparent outline-none resize-none text-sm placeholder-stone-600'
             style={{ color: THEME.ivory }}
           />
 
@@ -544,28 +657,30 @@ function Composer({
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isUploading || isLoading}
-                className='px-2 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1.5'
+                className='px-2.5 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1.5 hover:opacity-80 disabled:opacity-50'
                 style={{
-                  color: THEME.stoneMuted,
+                  color: isUploading ? THEME.copper : THEME.stoneMuted,
                   backgroundColor: THEME.bgHeader,
                 }}
               >
                 <span className='text-[14px]'>📎</span>
-                {isUploading ? "Uploading..." : "Attach PDF"}
+                {isUploading ? "Uploading PDF..." : "Attach PDF"}
               </button>
             </div>
 
             <button
               onClick={() => sendMessage()}
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || (!input.trim() && !attachedFile)}
               className='ml-auto px-4 py-2 rounded-lg text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed'
               style={{
                 backgroundColor:
-                  isLoading || !input.trim()
+                  isLoading || (!input.trim() && !attachedFile)
                     ? THEME.surfaceRaised
                     : THEME.copper,
                 color:
-                  isLoading || !input.trim() ? THEME.stoneMuted : "#14110C",
+                  isLoading || (!input.trim() && !attachedFile)
+                    ? THEME.stoneMuted
+                    : "#14110C",
               }}
             >
               <span>SEND</span>
