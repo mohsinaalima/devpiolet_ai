@@ -26,7 +26,7 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [attachedFile, setAttachedFile] = useState(null);
+  const [pendingFile, setPendingFile] = useState(null); // Raw file held locally before send
 
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -42,32 +42,51 @@ export default function App() {
   const handleNewChat = () => {
     setMessages([]);
     setInput("");
-    setAttachedFile(null);
+    setPendingFile(null);
   };
 
   const sendMessage = async (customPrompt) => {
     const textToSend = customPrompt || input;
-    if ((!textToSend.trim() && !attachedFile) || isLoading) return;
+    if ((!textToSend.trim() && !pendingFile) || isLoading) return;
 
-    const finalContent =
-      textToSend.trim() ||
-      `Please analyze the uploaded document "${attachedFile?.name}".`;
-
-    const userMessage = {
-      role: "user",
-      content: finalContent,
-      file: attachedFile
-        ? { name: attachedFile.name, size: attachedFile.size }
-        : null,
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    if (!customPrompt) setInput("");
-    setAttachedFile(null); // Clear attached file preview after sending
     setIsLoading(true);
+    const fileToUpload = pendingFile;
+    setPendingFile(null); // Clear composer preview state immediately
 
     try {
       const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
+      // 1. Step 1: Upload the PDF ONLY when user hits Send
+      if (fileToUpload) {
+        const formData = new FormData();
+        formData.append("file", fileToUpload);
+
+        const uploadResponse = await fetch(`${API_URL}/api/upload`, {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!uploadResponse.ok) {
+          throw new Error("Failed to ingest attached document.");
+        }
+      }
+
+      // 2. Step 2: Send prompt to backend RAG chat
+      const finalContent =
+        textToSend.trim() ||
+        `Please analyze the uploaded document "${fileToUpload?.name}".`;
+
+      const userMessage = {
+        role: "user",
+        content: finalContent,
+        file: fileToUpload
+          ? { name: fileToUpload.name, size: fileToUpload.size }
+          : null,
+      };
+
+      setMessages((prev) => [...prev, userMessage]);
+      if (!customPrompt) setInput("");
+
       const response = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -85,13 +104,13 @@ export default function App() {
         },
       ]);
     } catch (error) {
-      console.error("Error sending message:", error);
+      console.error("Error sending message/uploading:", error);
       setMessages((prev) => [
         ...prev,
         {
           role: "ai",
           content:
-            "⚠️ **Connection Error**: Couldn't reach the backend server. Please verify your API status.",
+            "⚠️ **Processing Error**: Couldn't upload the file or reach the chat backend server.",
           agent: "System",
         },
       ]);
@@ -162,7 +181,7 @@ export default function App() {
                   className='text-xs font-mono tracking-wider mr-2'
                   style={{ color: THEME.stoneMuted }}
                 >
-                  THINKING
+                  PROCESSING
                 </span>
                 {[0, 150, 300].map((delay) => (
                   <div
@@ -189,8 +208,8 @@ export default function App() {
           focused={focused}
           setFocused={setFocused}
           textareaRef={textareaRef}
-          attachedFile={attachedFile}
-          setAttachedFile={setAttachedFile}
+          pendingFile={pendingFile}
+          setPendingFile={setPendingFile}
         />
       </div>
     </div>
@@ -510,11 +529,10 @@ function Composer({
   focused,
   setFocused,
   textareaRef,
-  attachedFile,
-  setAttachedFile,
+  pendingFile,
+  setPendingFile,
 }) {
   const fileInputRef = useRef(null);
-  const [isUploading, setIsUploading] = useState(false);
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -523,44 +541,22 @@ function Composer({
     }
   };
 
-  const handleFileUpload = async (e) => {
+  // Purely attach file locally in state (NO server fetch)
+  const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    setIsUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
+    const isPdf =
+      file.type === "application/pdf" ||
+      file.name.toLowerCase().endsWith(".pdf");
 
-    try {
-      const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-      const response = await fetch(`${API_URL}/api/upload`, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (response.ok) {
-        console.log("Upload Success 200 OK. Setting state for:", file.name);
-        setAttachedFile({
-          name: file.name,
-          size: file.size,
-        });
-      } else {
-        alert(`Upload failed with status code ${response.status}`);
-      }
-    } catch (error) {
-      console.error("Error uploading file:", error);
-      alert("Error connecting to server for file upload.");
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+    if (!isPdf) {
+      alert("Please select a valid PDF file.");
+      return;
     }
-  };
 
-  const formatFileSize = (bytes) => {
-    if (!bytes) return "";
-    return bytes > 1024 * 1024
-      ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-      : `${(bytes / 1024).toFixed(1)} KB`;
+    setPendingFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   return (
@@ -573,58 +569,49 @@ function Composer({
     >
       <div className='max-w-4xl mx-auto relative'>
         <div
-          className='rounded-xl transition-all flex flex-col'
+          className='rounded-2xl transition-all flex flex-col p-2'
           style={{
             backgroundColor: THEME.surface,
             border: `1px solid ${
-              attachedFile
-                ? THEME.copper
-                : focused
-                  ? THEME.copper
-                  : THEME.border
+              pendingFile ? THEME.copper : focused ? THEME.copper : THEME.border
             }`,
             boxShadow: focused ? `0 0 12px ${THEME.copperMuted}` : "none",
           }}
         >
-          {/* Active File Badge inside Composer */}
-          {attachedFile && (
+          {/* Deferred File Attachment Chip (Matches Image UI) */}
+          {pendingFile && (
             <div
-              className='m-3 p-3 rounded-lg flex items-center justify-between text-xs border'
+              className='m-2 inline-flex items-center gap-3 p-3 rounded-xl max-w-sm relative border select-none'
               style={{
-                backgroundColor: THEME.bgHeader,
-                borderColor: THEME.copper,
-                color: THEME.ivory,
+                backgroundColor: "#262622",
+                borderColor: THEME.borderStrong,
               }}
             >
-              <div className='flex items-center gap-3 min-w-0'>
-                <span className='text-lg'>📄</span>
-                <div className='flex flex-col min-w-0'>
-                  <span
-                    className='font-semibold truncate text-sm'
-                    style={{ color: THEME.ivory }}
-                  >
-                    {attachedFile.name}
-                  </span>
-                  <span
-                    style={{ color: THEME.sage }}
-                    className='text-[11px] font-mono flex items-center gap-1.5 mt-0.5'
-                  >
-                    <span
-                      className='w-1.5 h-1.5 rounded-full'
-                      style={{ backgroundColor: THEME.sage }}
-                    />
-                    {formatFileSize(attachedFile.size)} • Indexed in PostgreSQL
-                  </span>
-                </div>
-              </div>
+              {/* Dismiss / Close Icon */}
               <button
-                onClick={() => setAttachedFile(null)}
-                className='px-2 py-1 rounded transition-colors text-xs font-bold hover:text-red-400'
-                style={{ color: THEME.stoneMuted }}
+                onClick={() => setPendingFile(null)}
+                className='absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-stone-200 text-stone-900 flex items-center justify-center text-[10px] font-bold shadow hover:bg-white transition-colors'
                 title='Remove attachment'
               >
                 ✕
               </button>
+
+              {/* Red PDF Icon Badge */}
+              <div className='w-8 h-9 rounded-md bg-red-950/60 border border-red-700/50 flex flex-col items-center justify-center flex-shrink-0'>
+                <span className='text-[9px] font-black text-red-500 uppercase tracking-tight leading-none'>
+                  PDF
+                </span>
+              </div>
+
+              {/* Title & Subtitle */}
+              <div className='flex flex-col min-w-0 pr-2'>
+                <span className='text-xs font-semibold truncate text-stone-200'>
+                  {pendingFile.name}
+                </span>
+                <span className='text-[10px] text-stone-400 font-medium'>
+                  PDF
+                </span>
+              </div>
             </div>
           )}
 
@@ -637,48 +624,48 @@ function Composer({
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder={
-              attachedFile
-                ? `Ask anything about ${attachedFile.name}...`
+              pendingFile
+                ? "Ask anything about this PDF..."
                 : "Ask DevPilot, attach a PDF, or request code reviews..."
             }
-            className='w-full p-4 bg-transparent outline-none resize-none text-sm placeholder-stone-600'
+            className='w-full px-3 py-2 bg-transparent outline-none resize-none text-sm placeholder-stone-600'
             style={{ color: THEME.ivory }}
           />
 
-          <div className='flex items-center justify-between px-3 pb-3'>
+          <div className='flex items-center justify-between px-2 pt-1 pb-1'>
             <div className='flex items-center gap-2'>
               <input
                 type='file'
                 accept='.pdf'
                 ref={fileInputRef}
-                onChange={handleFileUpload}
+                onChange={handleFileSelect}
                 className='hidden'
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading || isLoading}
+                disabled={isLoading}
                 className='px-2.5 py-1.5 rounded-md text-xs transition-colors flex items-center gap-1.5 hover:opacity-80 disabled:opacity-50'
                 style={{
-                  color: isUploading ? THEME.copper : THEME.stoneMuted,
+                  color: THEME.stoneMuted,
                   backgroundColor: THEME.bgHeader,
                 }}
               >
                 <span className='text-[14px]'>📎</span>
-                {isUploading ? "Uploading PDF..." : "Attach PDF"}
+                <span>Attach PDF</span>
               </button>
             </div>
 
             <button
               onClick={() => sendMessage()}
-              disabled={isLoading || (!input.trim() && !attachedFile)}
+              disabled={isLoading || (!input.trim() && !pendingFile)}
               className='ml-auto px-4 py-2 rounded-lg text-xs font-bold tracking-wide transition-all flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed'
               style={{
                 backgroundColor:
-                  isLoading || (!input.trim() && !attachedFile)
+                  isLoading || (!input.trim() && !pendingFile)
                     ? THEME.surfaceRaised
                     : THEME.copper,
                 color:
-                  isLoading || (!input.trim() && !attachedFile)
+                  isLoading || (!input.trim() && !pendingFile)
                     ? THEME.stoneMuted
                     : "#14110C",
               }}

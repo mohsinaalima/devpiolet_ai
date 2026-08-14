@@ -23,7 +23,7 @@ def ingest_pdf(file_path: str):
     and store the embeddings in PostgreSQL using PGVector.
     """
 
-    print(f"\n📄 --- Starting PDF Ingestion: {file_path} ---")
+    print(f"\n --- Starting PDF Ingestion: {file_path} ---")
 
     try:
         # --------------------------------------------------
