@@ -1,3 +1,7 @@
+from fastapi import File, UploadFile, HTTPException
+import shutil
+import os
+from app.rag.ingest import ingest_pdf
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -75,3 +79,29 @@ async def chat_endpoint(request: ChatRequest):
             "agent_used": "system_error",
             "response": f"⚠️ **Server Error:** Oops, something went wrong on the backend."
         }
+    
+@app.post("/api/upload")
+async def upload_pdf(file: UploadFile = File(...)):
+    if not file.filename.endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    
+    upload_dir = "temp_uploads"
+    os.makedirs(upload_dir, exist_ok=True)
+    file_path = os.path.join(upload_dir, file.filename)
+    
+    try:
+        # Save the file temporarily
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        # Trigger your RAG ingestion process
+        success = ingest_pdf(file_path)
+        
+        if success:
+            return {"status": "success", "message": "Document processed", "filename": file.filename}
+        else:
+            raise HTTPException(status_code=500, detail="Failed to extract text from PDF.")
+            
+    except Exception as e:
+        print(f"Error processing file: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process document.")
