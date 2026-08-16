@@ -3,6 +3,12 @@ import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
+// Helper to generate unique session IDs
+const generateId = () =>
+  crypto.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).substring(2, 15);
+
 // ── DevPilot Color Palette ──────────────────────────────────────────
 const THEME = {
   bg: "#141411",
@@ -26,7 +32,11 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [pendingFile, setPendingFile] = useState(null); // Raw file held locally before send
+  const [pendingFile, setPendingFile] = useState(null);
+
+  // 🆕 Chat History State
+  const [sessions, setSessions] = useState([]);
+  const [currentSessionId, setCurrentSessionId] = useState(generateId());
 
   const messagesEndRef = useRef(null);
   const textareaRef = useRef(null);
@@ -35,12 +45,48 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
+  // 🆕 Load sessions and current history on initial mount
   useEffect(() => {
+    const savedSessions = JSON.parse(
+      localStorage.getItem("devpilot_sessions") || "[]",
+    );
+    setSessions(savedSessions);
+
+    if (savedSessions.length > 0) {
+      const activeId = savedSessions[0].id;
+      setCurrentSessionId(activeId);
+      const savedMessages = JSON.parse(
+        localStorage.getItem(`devpilot_msgs_${activeId}`) || "[]",
+      );
+      setMessages(savedMessages);
+    }
+  }, []);
+
+  // 🆕 Save messages to localStorage whenever they change
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem(
+        `devpilot_msgs_${currentSessionId}`,
+        JSON.stringify(messages),
+      );
+    }
     scrollToBottom();
-  }, [messages, isLoading]);
+  }, [messages, currentSessionId, isLoading]);
 
   const handleNewChat = () => {
     setMessages([]);
+    setInput("");
+    setPendingFile(null);
+    setCurrentSessionId(generateId()); // Start fresh session
+  };
+
+  const handleSelectSession = (sessionId) => {
+    if (sessionId === currentSessionId) return;
+    setCurrentSessionId(sessionId);
+    const savedMessages = JSON.parse(
+      localStorage.getItem(`devpilot_msgs_${sessionId}`) || "[]",
+    );
+    setMessages(savedMessages);
     setInput("");
     setPendingFile(null);
   };
@@ -51,30 +97,43 @@ export default function App() {
 
     setIsLoading(true);
     const fileToUpload = pendingFile;
-    setPendingFile(null); // Clear composer preview state immediately
+    setPendingFile(null);
 
     try {
       const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
-      // 1. Step 1: Upload the PDF ONLY when user hits Send
       if (fileToUpload) {
         const formData = new FormData();
         formData.append("file", fileToUpload);
-
         const uploadResponse = await fetch(`${API_URL}/api/upload`, {
           method: "POST",
           body: formData,
         });
-
-        if (!uploadResponse.ok) {
-          throw new Error("Failed to ingest attached document.");
-        }
+        if (!uploadResponse.ok) throw new Error("Failed to ingest document.");
       }
 
-      // 2. Step 2: Send prompt to backend RAG chat
       const finalContent =
         textToSend.trim() ||
         `Please analyze the uploaded document "${fileToUpload?.name}".`;
+
+      // 🆕 Create/Update Session in sidebar if it's the first message
+      if (messages.length === 0) {
+        const newTitle =
+          finalContent.length > 25
+            ? finalContent.substring(0, 25) + "..."
+            : finalContent;
+        const newSession = {
+          id: currentSessionId,
+          title: newTitle,
+          timestamp: Date.now(),
+        };
+        const updatedSessions = [newSession, ...sessions];
+        setSessions(updatedSessions);
+        localStorage.setItem(
+          "devpilot_sessions",
+          JSON.stringify(updatedSessions),
+        );
+      }
 
       const userMessage = {
         role: "user",
@@ -87,10 +146,14 @@ export default function App() {
       setMessages((prev) => [...prev, userMessage]);
       if (!customPrompt) setInput("");
 
+      // 🆕 Pass session_id to backend
       const response = await fetch(`${API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: finalContent }),
+        body: JSON.stringify({
+          message: finalContent,
+          session_id: currentSessionId,
+        }),
       });
 
       const data = await response.json();
@@ -104,13 +167,13 @@ export default function App() {
         },
       ]);
     } catch (error) {
-      console.error("Error sending message/uploading:", error);
+      console.error("Error sending message:", error);
       setMessages((prev) => [
         ...prev,
         {
           role: "ai",
           content:
-            "⚠️ **Processing Error**: Couldn't upload the file or reach the chat backend server.",
+            "⚠️ **Processing Error**: Couldn't reach the chat backend server.",
           agent: "System",
         },
       ]);
@@ -124,12 +187,16 @@ export default function App() {
       className='flex h-screen font-sans overflow-hidden antialiased select-none'
       style={{ backgroundColor: THEME.bg, color: THEME.ivory }}
     >
-      {/* Sidebar */}
-      <Sidebar onNewChat={handleNewChat} messageCount={messages.length} />
+      {/* 🆕 Updated Sidebar with props */}
+      <Sidebar
+        onNewChat={handleNewChat}
+        messageCount={messages.length}
+        sessions={sessions}
+        currentSessionId={currentSessionId}
+        onSelectSession={handleSelectSession}
+      />
 
-      {/* Main Chat Workspace */}
       <div className='flex-1 flex flex-col h-screen relative'>
-        {/* Mobile Header */}
         <header
           className='p-4 flex items-center justify-between md:hidden z-10'
           style={{
@@ -158,7 +225,6 @@ export default function App() {
           </button>
         </header>
 
-        {/* Message Feed */}
         <div className='flex-1 overflow-y-auto px-4 py-6 md:px-12 md:py-8 space-y-6 scroll-smooth select-text'>
           {messages.length === 0 ? (
             <EmptyState onSelectPrompt={(prompt) => sendMessage(prompt)} />
@@ -166,7 +232,6 @@ export default function App() {
             messages.map((msg, idx) => <MessageItem key={idx} message={msg} />)
           )}
 
-          {/* Thinking Indicator */}
           {isLoading && (
             <div className='flex justify-start'>
               <div
@@ -199,7 +264,6 @@ export default function App() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Composer / Input Area */}
         <Composer
           input={input}
           setInput={setInput}
@@ -218,7 +282,13 @@ export default function App() {
 
 // ── Sub-Components ──────────────────────────────────────────────────
 
-function Sidebar({ onNewChat, messageCount }) {
+function Sidebar({
+  onNewChat,
+  messageCount,
+  sessions,
+  currentSessionId,
+  onSelectSession,
+}) {
   return (
     <aside
       className='w-64 hidden md:flex flex-col p-5 select-none'
@@ -244,7 +314,7 @@ function Sidebar({ onNewChat, messageCount }) {
 
       <button
         onClick={onNewChat}
-        className='w-full px-3.5 py-2.5 rounded-lg flex items-center justify-between text-sm font-medium transition-all group mb-6 hover:opacity-90'
+        className='w-full px-3.5 py-2.5 rounded-lg flex items-center justify-between text-sm font-medium transition-all group mb-4 hover:opacity-90'
         style={{
           backgroundColor: THEME.surfaceRaised,
           border: `1px solid ${THEME.border}`,
@@ -255,17 +325,36 @@ function Sidebar({ onNewChat, messageCount }) {
           <span style={{ color: THEME.copper }}>+</span>
           <span>New session</span>
         </div>
-        {messageCount > 0 && (
-          <span
-            className='text-[10px] px-1.5 py-0.5 rounded font-mono'
-            style={{ backgroundColor: THEME.bg, color: THEME.stoneMuted }}
-          >
-            {messageCount}
-          </span>
-        )}
       </button>
 
-      <div className='space-y-3 mb-8'>
+      {/* 🆕 Scrollable Chat History List */}
+      <div className='flex-1 overflow-y-auto pr-2 space-y-1 mb-4 custom-scrollbar'>
+        {sessions.map((session) => (
+          <button
+            key={session.id}
+            onClick={() => onSelectSession(session.id)}
+            className='w-full text-left px-3 py-2 rounded-lg text-xs font-medium truncate transition-colors duration-200'
+            style={{
+              backgroundColor:
+                currentSessionId === session.id
+                  ? THEME.surfaceRaised
+                  : "transparent",
+              color:
+                currentSessionId === session.id
+                  ? THEME.ivory
+                  : THEME.stoneSecondary,
+              border: `1px solid ${currentSessionId === session.id ? THEME.borderStrong : "transparent"}`,
+            }}
+          >
+            {session.title}
+          </button>
+        ))}
+      </div>
+
+      <div
+        className='space-y-3 mb-8 pt-4 border-t'
+        style={{ borderColor: THEME.border }}
+      >
         <div
           className='text-[11px] font-mono uppercase tracking-wider'
           style={{ color: THEME.stoneMuted }}
@@ -291,8 +380,8 @@ function Sidebar({ onNewChat, messageCount }) {
       </div>
 
       <div
-        className='mt-auto pt-4 border-t border-[#22221D] flex items-center justify-between text-xs'
-        style={{ color: THEME.stoneMuted }}
+        className='mt-auto pt-4 border-t flex items-center justify-between text-xs'
+        style={{ borderColor: THEME.border, color: THEME.stoneMuted }}
       >
         <div className='flex items-center gap-2'>
           <span
@@ -301,11 +390,13 @@ function Sidebar({ onNewChat, messageCount }) {
           />
           <span>Backend Ready</span>
         </div>
-        <span className='font-mono text-[10px]'>v1.0.0</span>
+        <span className='font-mono text-[10px]'>v1.1.0</span>
       </div>
     </aside>
   );
 }
+
+// ── Components below remain EXACTLY as they were in your code ──
 
 function EmptyState({ onSelectPrompt }) {
   const prompts = [
@@ -322,7 +413,6 @@ function EmptyState({ onSelectPrompt }) {
       text: "How can I refactor this function to be more clean and performant?",
     },
   ];
-
   return (
     <div className='flex flex-col items-center justify-center min-h-[70vh] text-center max-w-xl mx-auto px-4'>
       <div
@@ -348,7 +438,6 @@ function EmptyState({ onSelectPrompt }) {
         High-precision engineering intelligence. Drop code, debug errors, or
         discuss system architecture without fluff.
       </p>
-
       <div className='grid grid-cols-1 sm:grid-cols-3 gap-3 w-full'>
         {prompts.map((p, i) => (
           <button
@@ -381,14 +470,12 @@ function EmptyState({ onSelectPrompt }) {
 
 function MessageItem({ message }) {
   const isUser = message.role === "user";
-
   const formatFileSize = (bytes) => {
     if (!bytes) return "";
     return bytes > 1024 * 1024
       ? `${(bytes / (1024 * 1024)).toFixed(1)} MB`
       : `${(bytes / 1024).toFixed(1)} KB`;
   };
-
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
@@ -417,7 +504,6 @@ function MessageItem({ message }) {
             <span>Agent / {message.agent || "System"}</span>
           </div>
         )}
-
         {message.file && (
           <div
             className='mb-3.5 p-2.5 rounded-lg flex items-center gap-2.5 text-xs border'
@@ -453,11 +539,8 @@ function MessageItem({ message }) {
             </div>
           </div>
         )}
-
         <div
-          className={`prose prose-invert max-w-none text-sm leading-relaxed ${
-            isUser ? "font-medium" : ""
-          }`}
+          className={`prose prose-invert max-w-none text-sm leading-relaxed ${isUser ? "font-medium" : ""}`}
         >
           <ReactMarkdown
             components={{
@@ -533,32 +616,25 @@ function Composer({
   setPendingFile,
 }) {
   const fileInputRef = useRef(null);
-
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
     }
   };
-
-  // Purely attach file locally in state (NO server fetch)
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
     const isPdf =
       file.type === "application/pdf" ||
       file.name.toLowerCase().endsWith(".pdf");
-
     if (!isPdf) {
       alert("Please select a valid PDF file.");
       return;
     }
-
     setPendingFile(file);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
-
   return (
     <div
       className='p-4 md:p-6'
@@ -572,13 +648,10 @@ function Composer({
           className='rounded-2xl transition-all flex flex-col p-2'
           style={{
             backgroundColor: THEME.surface,
-            border: `1px solid ${
-              pendingFile ? THEME.copper : focused ? THEME.copper : THEME.border
-            }`,
+            border: `1px solid ${pendingFile ? THEME.copper : focused ? THEME.copper : THEME.border}`,
             boxShadow: focused ? `0 0 12px ${THEME.copperMuted}` : "none",
           }}
         >
-          {/* Deferred File Attachment Chip (Matches Image UI) */}
           {pendingFile && (
             <div
               className='m-2 inline-flex items-center gap-3 p-3 rounded-xl max-w-sm relative border select-none'
@@ -587,7 +660,6 @@ function Composer({
                 borderColor: THEME.borderStrong,
               }}
             >
-              {/* Dismiss / Close Icon */}
               <button
                 onClick={() => setPendingFile(null)}
                 className='absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-stone-200 text-stone-900 flex items-center justify-center text-[10px] font-bold shadow hover:bg-white transition-colors'
@@ -595,15 +667,11 @@ function Composer({
               >
                 ✕
               </button>
-
-              {/* Red PDF Icon Badge */}
               <div className='w-8 h-9 rounded-md bg-red-950/60 border border-red-700/50 flex flex-col items-center justify-center flex-shrink-0'>
                 <span className='text-[9px] font-black text-red-500 uppercase tracking-tight leading-none'>
                   PDF
                 </span>
               </div>
-
-              {/* Title & Subtitle */}
               <div className='flex flex-col min-w-0 pr-2'>
                 <span className='text-xs font-semibold truncate text-stone-200'>
                   {pendingFile.name}
@@ -614,7 +682,6 @@ function Composer({
               </div>
             </div>
           )}
-
           <textarea
             ref={textareaRef}
             rows={2}
@@ -631,7 +698,6 @@ function Composer({
             className='w-full px-3 py-2 bg-transparent outline-none resize-none text-sm placeholder-stone-600'
             style={{ color: THEME.ivory }}
           />
-
           <div className='flex items-center justify-between px-2 pt-1 pb-1'>
             <div className='flex items-center gap-2'>
               <input
@@ -654,7 +720,6 @@ function Composer({
                 <span>Attach PDF</span>
               </button>
             </div>
-
             <button
               onClick={() => sendMessage()}
               disabled={isLoading || (!input.trim() && !pendingFile)}
