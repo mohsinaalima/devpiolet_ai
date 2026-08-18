@@ -18,7 +18,7 @@ def get_connection_string() -> str:
         return db_url
     
     # Fallback matching your running Docker container port (5454)
-    return "postgresql+psycopg2://postgres:postgres@localhost:5454/devpilot_db"
+    return "postgresql+psycopg2://devpilot:devpilot_password@localhost:5454/devpilot_db"
 
 
 def ingest_pdf(file_path: str) -> bool:
@@ -71,9 +71,9 @@ def ingest_pdf(file_path: str) -> bool:
 
         # FIX: Strip 'models/' prefix so LangChain routes the API call correctly
         embeddings = GoogleGenerativeAIEmbeddings(
-            model="text-embedding-004",
-            google_api_key=api_key,
-        )
+    model="models/gemini-embedding-001",
+    google_api_key=api_key,
+)
 
         print("-> Gemini embedding model initialized.")
 
