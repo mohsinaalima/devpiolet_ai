@@ -52,7 +52,7 @@ def get_llm():
     if not api_key:
         raise ValueError("Gemini API key not found in .env file.")
     return ChatGoogleGenerativeAI(
-        model="gemini-3.5-flash", 
+        model="gemini-3.5-flash-lite", 
         api_key=api_key,
     )
 
