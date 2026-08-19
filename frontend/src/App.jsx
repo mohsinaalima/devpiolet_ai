@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { atomDark } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -29,13 +29,35 @@ const THEME = {
 
 export default function App() {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(() => {
+  try {
+    const savedSessions = JSON.parse(
+      localStorage.getItem("devpilot_sessions") || "[]"
+    );
+
+    if (savedSessions.length === 0) return [];
+
+    const activeId = savedSessions[0].id;
+
+    return JSON.parse(
+      localStorage.getItem(`devpilot_msgs_${activeId}`) || "[]"
+    );
+  } catch {
+    return [];
+  }
+});
   const [isLoading, setIsLoading] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pendingFile, setPendingFile] = useState(null);
 
   // 🆕 Chat History State
-  const [sessions, setSessions] = useState([]);
+  const [sessions, setSessions] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("devpilot_sessions") || "[]");
+    } catch {
+      return [];
+    }
+  });
   const [currentSessionId, setCurrentSessionId] = useState(generateId());
 
   const messagesEndRef = useRef(null);
@@ -45,23 +67,7 @@ export default function App() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // 🆕 Load sessions and current history on initial mount
-  useEffect(() => {
-    const savedSessions = JSON.parse(
-      localStorage.getItem("devpilot_sessions") || "[]",
-    );
-    setSessions(savedSessions);
-
-    if (savedSessions.length > 0) {
-      const activeId = savedSessions[0].id;
-      setCurrentSessionId(activeId);
-      const savedMessages = JSON.parse(
-        localStorage.getItem(`devpilot_msgs_${activeId}`) || "[]",
-      );
-      setMessages(savedMessages);
-    }
-  }, []);
-
+  
   // 🆕 Save messages to localStorage whenever they change
   useEffect(() => {
     if (messages.length > 0) {
@@ -190,7 +196,6 @@ export default function App() {
       {/* 🆕 Updated Sidebar with props */}
       <Sidebar
         onNewChat={handleNewChat}
-        messageCount={messages.length}
         sessions={sessions}
         currentSessionId={currentSessionId}
         onSelectSession={handleSelectSession}
@@ -282,13 +287,7 @@ export default function App() {
 
 // ── Sub-Components ──────────────────────────────────────────────────
 
-function Sidebar({
-  onNewChat,
-  messageCount,
-  sessions,
-  currentSessionId,
-  onSelectSession,
-}) {
+function Sidebar({ onNewChat, sessions, currentSessionId, onSelectSession }) {
   return (
     <aside
       className='w-64 hidden md:flex flex-col p-5 select-none'
@@ -544,7 +543,7 @@ function MessageItem({ message }) {
         >
           <ReactMarkdown
             components={{
-              code({ node, inline, className, children, ...props }) {
+              code({ inline, className, children, ...props }) {
                 const match = /language-(\w+)/.exec(className || "");
                 return !inline && match ? (
                   <div
