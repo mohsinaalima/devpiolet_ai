@@ -23,19 +23,14 @@ COLLECTION_NAME = "devpilot_pdf_knowledge"
 def get_connection_string() -> str:
     """
     Get PostgreSQL connection string from environment variables.
-    Uses Docker PostgreSQL configuration as fallback.
     """
 
     db_url = os.getenv("DATABASE_URL")
 
-    if db_url:
-        return db_url
+    if not db_url:
+        raise ValueError("DATABASE_URL is not configured")
 
-    return (
-        "postgresql+psycopg2://"
-        "devpilot:devpilot_password"
-        "@localhost:5454/devpilot_db"
-    )
+    return db_url
 
 
 # ============================================================
